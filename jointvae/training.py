@@ -109,9 +109,9 @@ class Trainer():
 
         self.model.train()
         for epoch in range(epochs):
-            valid_loss, mean_epoch_loss = self._train_epoch(train_loader, valid_loader)
-            print('Epoch: {} Average loss: {:.2f} Valid loss: {}\tRecon:{:.3f}'.format(epoch + 1,
-                                                          self.batch_size * self.model.num_pixels * mean_epoch_loss, valid_loss,self.losses['recon_loss'][-1]))
+            valid_loss, mean_epoch_loss,recon_error = self._train_epoch(train_loader, valid_loader)
+            print('Epoch: {} Average loss: {:.2f} Valid loss: {}\tRecon Error:{:.3f}'.format(epoch + 1,
+                                                          self.batch_size * self.model.num_pixels * mean_epoch_loss, valid_loss,recon_error))#self.losses['recon_loss'][-1]
 
 
         #     if save_training_gif is not None:
@@ -147,7 +147,7 @@ class Trainer():
         #items = iter(train_loader)
         #for batch_idx in range(len(train_loader)):
             #(data, label) = next(items)
-            iter_loss, l0_loss = self._train_iteration(data)
+            iter_loss, l0_loss = self._train_iteration(torch.unsqueeze(data,1).to(dtype=torch.float32))
             total_l0 += l0_loss
             epoch_loss += iter_loss
             print_every_loss += iter_loss
@@ -164,13 +164,13 @@ class Trainer():
                                                   self.model.num_pixels * mean_loss,self.model.num_pixels *l0))
                 print_every_loss = 0.
                 total_l0 = 0.
-        val_loss = self.evaluate(valid_loader)
+        val_loss,recon_error = self.evaluate(valid_loader)
         print(val_loss)
         if val_loss < self.best_val_loss:
             self.best_model = copy.deepcopy(self.model)
             self.best_val_loss = val_loss
         # Return mean epoch loss
-        return val_loss, epoch_loss / len(train_loader.dataset)
+        return val_loss, epoch_loss / len(train_loader.dataset),recon_error
 
     def evaluate(self,valid_loader):
         """
@@ -181,17 +181,18 @@ class Trainer():
         batch_num = 0.
         epoch_loss = 0.
         for batch_idx, (data, label) in enumerate(list(valid_loader)):
-            data = data.cuda()
-            recon_batch, latent_dist, mask, l0_reg = self.model(data)
-            loss = self._loss_function(data, recon_batch, latent_dist, mask)# + l0_reg
+            data = data.cuda().to(dtype=torch.float32)
+            recon_batch, latent_dist, mask, l0_reg = self.model(torch.unsqueeze(data,1).to(dtype=torch.float32))
+            loss,recon = self._loss_function(data, recon_batch, latent_dist, mask,eval=True)# + l0_reg
             iter_loss = loss.item()
             epoch_loss += iter_loss
             batch_num += 1
         mean_loss = epoch_loss/batch_num
-        print('Valid Loss: {:.3f}, L0 Loss: {:.3f}'.format(self.model.num_pixels * mean_loss, l0_reg))
-
         valid_loss = self.model.num_pixels * mean_loss
-        return valid_loss
+        recon_error = recon/self.model.num_pixels
+        print('Valid Loss: {:.3f}, Recon Error: {:.3f}'.format(valid_loss,recon_error ))
+        
+        return valid_loss,recon_error
 
 
     def _train_iteration(self, data):
@@ -218,7 +219,7 @@ class Trainer():
         train_loss = loss.item()
         return train_loss, l0_reg
 
-    def _loss_function(self, data, recon_data, latent_dist, mask):
+    def _loss_function(self, data, recon_data, latent_dist, mask, eval=False):
         """
         Calculates loss for a batch of data.
 
@@ -314,8 +315,10 @@ class Trainer():
         kl_loss = kl_cont_loss + kl_disc_loss
         DIP_loss = DIP_cont - DIP_disc
         # Calculate total loss
-        total_loss = recon_loss + cont_capacity_loss + disc_capacity_loss + DIP_loss
+        #total_loss = recon_loss + cont_capacity_loss + disc_capacity_loss + DIP_loss +kl_loss
+        total_loss = recon_loss + DIP_loss +kl_loss
         #print("rec",recon_loss,"cont_capa",cont_capacity_loss,"disc_capa",disc_capacity_loss,"DIP_cont",DIP_cont,"DIP_disc",DIP_disc)
+        #print("rec",recon_loss,"DIP_cont",DIP_cont,"kl_cont",kl_cont_loss,"kl_disc",kl_disc_loss)
         # Record losses
         if self.model.training and self.num_steps % self.record_loss_every == 1:
             self.losses['recon_loss'].append(recon_loss.item())
@@ -327,7 +330,12 @@ class Trainer():
             #self.losses['DIP_disc'].append(DIP_disc.item())
 
         # To avoid large losses normalise by number of pixels
-        return total_loss / self.model.num_pixels
+        if not eval:
+            return total_loss / self.model.num_pixels
+        else:
+        
+            return total_loss / self.model.num_pixels,recon_loss
+      
 
     def _kl_normal_loss(self, mean, var, mask):
         """
@@ -444,9 +452,9 @@ class Trainer():
         else:
             return 0
 
-    def best_model(self):
+    def get_best_model(self):
 
-        return self.best_model()
+        return self.best_model
 
     def get_losses(self):
 

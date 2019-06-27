@@ -165,7 +165,7 @@ class L0Pair(Module):
             self.use_bias = True
         self.floatTensor = torch.FloatTensor if not torch.cuda.is_available() else torch.cuda.FloatTensor
         self.reset_parameters()
-        print(self)
+
 
     def reset_parameters(self):
         init.kaiming_normal_(self.mean_weights, mode='fan_out')
@@ -243,11 +243,11 @@ class L0Pair(Module):
             if torch.sum(self.mask) == 0:
                 #z = self.sample_z(input.size(0), sample=self.training)
                 z = self.sample_mask()
-                print("unsaved", z)
+                # print("unsaved", z)
             else:
                 z1 = self.sample_mask()
                 z = self.mask
-                print("saved",z)
+                # print("saved",z)
             #xin = input.mul(z)
             #output = xin.mm(self.weights)
             mean = input.mm(self.mean_weights)
