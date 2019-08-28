@@ -188,6 +188,7 @@ class L0Pair(Module):
 
     def quantile_concrete(self, x):
         """Implements the quantile, aka inverse CDF, of the 'stretched' concrete distribution"""
+        x = x
         y = F.sigmoid((torch.log(x) - torch.log(1 - x) + self.qz_loga) / self.temperature)
         return y * (limit_b - limit_a) + limit_a
 

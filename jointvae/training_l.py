@@ -176,10 +176,11 @@ class Trainer():
         batch_num = 0.
         epoch_loss = 0.
         for batch_idx, (data, label) in enumerate(list(valid_loader)):
-            data = torch.unsqueeze(data,1).cuda().to(dtype=torch.float32)
+            data = data.cuda().to(dtype=torch.float32)
             #data=data.cuda()
-            recon_batch, latent_dist = self.model(data)
-            loss,recon = self._loss_function(data, recon_batch, latent_dist,eval=True)# + l0_reg
+            recon_batch, latent_list = self.model(data)
+            loss,recon = self._loss_function(data, recon_batch, latent_list,eval=True)# + l0_reg
+
             iter_loss = loss.item()
             epoch_loss += iter_loss
             batch_num += 1
@@ -202,7 +203,7 @@ class Trainer():
         """
         self.num_steps += 1
         if self.use_cuda:
-            data = torch.unsqueeze(data,1).cuda().to(dtype=torch.float32)
+            data = data.cuda().to(dtype=torch.float32)
             #data = data.cuda()
 
         self.optimizer.zero_grad()

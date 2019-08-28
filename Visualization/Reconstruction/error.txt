@@ -1,0 +1,12 @@
+555£º 0.007
+444£º0.009
+433£º 0.011
+333£º 0.012
+
+
+pick MIG or Gap between partial correlation
+why mid are not taken
+Partial correlation regularizor
+hierarchical DIP-VAE (additional within-level DIP regularizor)
+Pruning on VLAE
+Generation evaluation
