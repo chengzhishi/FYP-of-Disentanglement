@@ -16,7 +16,7 @@ EPS = 1e-12
 class Trainer():
     def __init__(self, model, optimizer, label_size, cont_capacity=None,
                  disc_capacity=None, print_loss_every=50, record_loss_every=5,
-                 use_cuda=True, lambda_d=None, lambda_od=None, lambda_dis=None):
+                 use_cuda=True, lambda_d=None, lambda_od=None, L_Lambda=None, lambda_dis=None):
         """
         Class to handle training of model.
 
@@ -55,6 +55,7 @@ class Trainer():
         self.lambda_d = lambda_d
         self.lambda_od = lambda_od
         self.lambda_dis = lambda_dis
+        self.L_Lambda = L_Lambda
         self.best_val_loss = 1e10
         self.best_model = model
         if self.model.img_size[1:] == (64, 64):
@@ -370,7 +371,7 @@ class Trainer():
         DIP_loss = general_DIP#DIP_cont #- DIP_disc
         # Calculate total loss
         # total_loss = recon_loss + cont_capacity_loss + disc_capacity_loss + DIP_loss +kl_loss
-        total_loss = recon_loss + DIP_loss + 3 * kl_loss
+        total_loss = recon_loss + DIP_loss + 3*kl_loss
         #print("recon_loss:", recon_loss ,"DIP_loss:", DIP_loss , "kl_loss:", kl_loss)
         # print("rec",recon_loss,"cont_capa",cont_capacity_loss,"disc_capa",disc_capacity_loss,"DIP_cont",DIP_cont,"DIP_disc",DIP_disc)
         # print("rec",recon_loss,"DIP_cont",DIP_cont,"kl_cont",kl_cont_loss,"kl_disc",kl_disc_loss)
@@ -626,7 +627,11 @@ class Trainer():
     def plot_partial_correlation(self, pcorr, hrule=None, mig=None, max_score=None, ax=None, epoch=0):
         ax = plt.gca() if ax is None else ax
         self.plot_hinton(pcorr.cpu().numpy(), cmap='RdBu', ax=ax)
-        ladder0_dim, ladder1_dim, ladder2_dim, ladder3_dim = self.model.ladder_dim[0], self.model.ladder_dim[1], self.model.ladder_dim[2], self.model.ladder_dim[3]
+        if len(self.model.ladder_dim) == 4:
+            ladder0_dim, ladder1_dim, ladder2_dim, ladder3_dim = self.model.ladder_dim[0], self.model.ladder_dim[1],\
+                                                                 self.model.ladder_dim[2], self.model.ladder_dim[3]
+        else:
+            ladder0_dim, ladder1_dim, ladder2_dim= self.model.ladder_dim[0], self.model.ladder_dim[1], self.model.ladder_dim[2]
         div_kwargs = dict(c='.8', lw=1, zorder=-1)
         if ladder0_dim > 0 and (ladder1_dim > 0 or ladder2_dim > 0):  # Cat vs. cont/bin separator
             ax.axvline(ladder0_dim - .5, **div_kwargs)
@@ -645,18 +650,32 @@ class Trainer():
         else:
             ax.set_yticklabels(['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'])
         ax.set_xticks(np.arange(pcorr.shape[1]))
-        ax.set_xticklabels([f"$c_{{{i + idx_offset}}}^{{}}$" for i in range(ladder0_dim + ladder1_dim + \
+        if len(self.model.ladder_dim) == 4:
+            ax.set_xticklabels([f"$c_{{{i + idx_offset}}}^{{}}$" for i in range(ladder0_dim + ladder1_dim + \
                                                                             ladder2_dim + ladder3_dim)])
-        #[f"$c_{{1}}^{{({i + 1})}}$" for i in range(ladder0_dim)] +
-        ax.tick_params(bottom=False, labelbottom=False, top=True, labeltop=True)
+            # [f"$c_{{1}}^{{({i + 1})}}$" for i in range(ladder0_dim)] +
+            ax.tick_params(bottom=False, labelbottom=False, top=True, labeltop=True)
 
-        def add_xlabel(x, s):
-            ax.text(x, pcorr.shape[0] - .5 + .2, s, ha='center', va='top', size='small')
+            def add_xlabel(x, s):
+                ax.text(x, pcorr.shape[0] - .5 + .2, s, ha='center', va='top', size='small')
 
-        cat_pos = (ladder0_dim - 1.) / 2.
-        cont_pos = ladder0_dim + (ladder1_dim - 1.) / 2.
-        bin_pos = ladder0_dim + ladder1_dim + (ladder2_dim - 1.) / 2.
-        last_pos = ladder0_dim + ladder1_dim + ladder2_dim + (ladder3_dim - 1.) /2.
+            cat_pos = (ladder0_dim - 1.) / 2.
+            cont_pos = ladder0_dim + (ladder1_dim - 1.) / 2.
+            bin_pos = ladder0_dim + ladder1_dim + (ladder2_dim - 1.) / 2.
+            last_pos = ladder0_dim + ladder1_dim + ladder2_dim + (ladder3_dim - 1.) / 2.
+        else:
+            ax.set_xticklabels([f"$c_{{{i + idx_offset}}}^{{}}$" for i in range(ladder0_dim + ladder1_dim + \
+                                                                                ladder2_dim)])
+            # [f"$c_{{1}}^{{({i + 1})}}$" for i in range(ladder0_dim)] +
+            ax.tick_params(bottom=False, labelbottom=False, top=True, labeltop=True)
+
+            def add_xlabel(x, s):
+                ax.text(x, pcorr.shape[0] - .5 + .2, s, ha='center', va='top', size='small')
+
+            cat_pos = (ladder0_dim - 1.) / 2.
+            cont_pos = ladder0_dim + (ladder1_dim - 1.) / 2.
+            bin_pos = ladder0_dim + ladder1_dim + (ladder2_dim - 1.) / 2.
+
         if ladder1_dim > 0 and ladder2_dim > 0:  # Adjust positions to avoid overlap
             cont_pos -= .1
             bin_pos += .1
@@ -667,8 +686,9 @@ class Trainer():
             add_xlabel(cont_pos, '2nd-level')
         if ladder2_dim > 0:
             add_xlabel(bin_pos, '3rd-level')
-        if ladder3_dim > 0:
-            add_xlabel(last_pos, '4th-level')
+        if len(self.model.ladder_dim) == 4:
+            if ladder3_dim > 0:
+                add_xlabel(last_pos, '4th-level')
 
         if mig is not None:
             ax.text(pcorr.shape[1] + .4, -1, "MIG", ha='center', va='center', size='medium')
@@ -685,15 +705,21 @@ class Trainer():
                     (self.model.ladder_dim[0], self.model.ladder_dim[1], self.model.ladder_dim[2])
         if not os.path.isdir(img_folder):
             os.makedirs(img_folder)
-
-        if mig is not None:
-            fig.savefig("{}/LDIP%s%s%s%s/%s.png".format('C:/Users/Cooper/FYP/FYP-of-Disentanglement-master/FYP-of-Disentanglement-master/visualization/dsprites') %
-                    (self.model.ladder_dim[0], self.model.ladder_dim[1], self.model.ladder_dim[2],self.model.ladder_dim[3], epoch), bbox_inches="tight")
+        if len(self.model.ladder_dim) == 4:
+            if mig is not None:
+                fig.savefig("{}/DIP%s%s%s%s/%s.png".format('C:/Users/Cooper/FYP/FYP-of-Disentanglement-master/FYP-of-Disentanglement-master/visualization/dsprites') %
+                        (self.model.ladder_dim[0], self.model.ladder_dim[1], self.model.ladder_dim[2], self.model.ladder_dim[3], epoch), bbox_inches="tight")
         else:
-            fig.savefig("{}/DIP%s%s%s%s/Digits%s.png".format(
-                'C:/Users/Cooper/FYP/FYP-of-Disentanglement-master/FYP-of-Disentanglement-master/visualization/dsprites') %
-                        (self.model.ladder_dim[0], self.model.ladder_dim[1], self.model.ladder_dim[2],self.model.ladder_dim[3], epoch),
-                        bbox_inches="tight")
+            if mig is not None:
+                fig.savefig("{}/DIP%s%s%s/%s.png".format(
+                    'C:/Users/Cooper/FYP/FYP-of-Disentanglement-master/FYP-of-Disentanglement-master/visualization/dsprites') %
+                            (self.model.ladder_dim[0], self.model.ladder_dim[1], self.model.ladder_dim[2], epoch),
+                            bbox_inches="tight")
+            else:
+                fig.savefig("{}/DIP%s%s%s/Digits%s.png".format(
+                    'C:/Users/Cooper/FYP/FYP-of-Disentanglement-master/FYP-of-Disentanglement-master/visualization/dsprites') %
+                            (self.model.ladder_dim[0], self.model.ladder_dim[1], self.model.ladder_dim[2], epoch),
+                            bbox_inches="tight")
         print("Plot Saved!!")
         plt.clf()
         plt.cla()

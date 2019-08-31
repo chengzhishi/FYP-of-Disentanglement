@@ -44,7 +44,7 @@ class DSPRITESReshaper(torch.nn.Module):
 
 
 class VLAE(nn.Module):
-    def __init__(self, img_size, ladder_dim, droprate_init=0.2, weight_decay=0.001, lambda_l0=0.1, temperature=.1, use_cuda=True):
+    def __init__(self, img_size, ladder_dim, droprate_init=0.2, weight_decay=0.001, lambda_l0=0.1, temperature=.1, pruning=False, use_cuda=True):
         """
         Class which defines model and forward pass.
 
@@ -67,7 +67,7 @@ class VLAE(nn.Module):
         """
         super(VLAE, self).__init__()
         self.use_cuda = use_cuda
-
+        self.pruning = pruning
         # Parameters
         self.img_size = img_size
         # self.is_continuous = 'cont' in latent_spec
@@ -85,15 +85,18 @@ class VLAE(nn.Module):
         self.lambda_l0 = lambda_l0
         self.fs = [self.img_size[1], self.img_size[1] // 2, self.img_size[1] // 4, self.img_size[1] // 8,
                    self.img_size[1] // 16]
-        self.ld = [3200]
+        if self.img_size[1:] == (64, 64):
+            self.ld = [4608]
+        else:
+            self.ld = [3200]
         # Calculate dimensions of latent distribution
         self.latent_cont_dim = sum(self.ladder_dim)
         self.latent_disc_dim = 0
         self.num_disc_latents = 0
-        if self.img_size[1:] == (64, 64):
-            self.cs = [1, 64, 128, 256, 512, 1024]
-        else:
-            self.cs = [1, 64, 128, 1024]
+        # if self.img_size[1:] == (64, 64):
+        #     self.cs = [1, 64, 128, 256, 512, 1024]
+        # else:
+        self.cs = [1, 64, 128, 1024]
         if self.is_continuous:
             self.latent_cont_dim = self.latent_spec['cont']
         if self.is_discrete:
@@ -190,24 +193,35 @@ class VLAE(nn.Module):
 
         # Encode parameters of latent distribution
         ##ladder distribution parameter outputs
-        ladder0_std_layers = [nn.Linear(self.ld[0], self.ladder_dim[0]), nn.Sigmoid()]
-        ladder1_std_layers = [nn.Linear(self.cs[3], self.ladder_dim[1]), nn.Sigmoid()]
-        ladder2_std_layers = [nn.Linear(self.cs[3], self.ladder_dim[2]), nn.Sigmoid()]
+        if self.pruning == False:
+            ladder0_std_layers = [nn.Linear(self.ld[0], self.ladder_dim[0]), nn.Sigmoid()]
+            ladder1_std_layers = [nn.Linear(self.cs[3], self.ladder_dim[1]), nn.Sigmoid()]
+            ladder2_std_layers = [nn.Linear(self.cs[3], self.ladder_dim[2]), nn.Sigmoid()]
 
-        self.ladder0_mean = nn.Linear(self.ld[0], self.ladder_dim[0])
-        self.ladder1_mean = nn.Linear(self.cs[3], self.ladder_dim[1])
-        self.ladder2_mean = nn.Linear(self.cs[3], self.ladder_dim[2])
+            self.ladder0_mean = nn.Linear(self.ld[0], self.ladder_dim[0])
+            self.ladder1_mean = nn.Linear(self.cs[3], self.ladder_dim[1])
+            self.ladder2_mean = nn.Linear(self.cs[3], self.ladder_dim[2])
 
-        self.ladder0_std = nn.Sequential(*ladder0_std_layers)
-        self.ladder1_std = nn.Sequential(*ladder1_std_layers)
-        self.ladder2_std = nn.Sequential(*ladder2_std_layers)
+            self.ladder0_std = nn.Sequential(*ladder0_std_layers)
+            self.ladder1_std = nn.Sequential(*ladder1_std_layers)
+            self.ladder2_std = nn.Sequential(*ladder2_std_layers)
 
-        if self.is_continuous:
-            '''self.fc_mean = nn.Sequential(L0Dense(self.hidden_dim, self.latent_cont_dim, droprate_init=self.droprate_init, weight_decay=self.weight_decay, lamba=self.lambda_l0))
-        
-            self.fc_log_var = nn.Sequential(L0Dense(self.hidden_dim, self.latent_cont_dim, droprate_init=self.droprate_init, weight_decay=self.weight_decay, lamba=self.lambda_l0))'''
-        
-            self.fc_latent = nn.Sequential(L0Pair(self.hidden_dim, self.latent_cont_dim, droprate_init=self.droprate_init, weight_decay=self.weight_decay, lamba=self.lambda_l0))
+        else:
+            self.ladder0_pair = nn.Sequential(L0Pair(self.ld[0], self.ladder_dim[0], droprate_init=self.droprate_init,
+                                 weight_decay=self.weight_decay, lamba=self.lambda_l0))
+            self.ladder1_pair = nn.Sequential(
+                L0Pair(self.cs[3], self.self.ladder_dim[1], droprate_init=self.droprate_init,
+                       weight_decay=self.weight_decay, lamba=self.lambda_l0))
+            self.ladder2_pair = nn.Sequential(
+                L0Pair(self.cs[3], self.self.ladder_dim[2], droprate_init=self.droprate_init,
+                       weight_decay=self.weight_decay, lamba=self.lambda_l0))
+
+        # if self.is_continuous:
+        #     '''self.fc_mean = nn.Sequential(L0Dense(self.hidden_dim, self.latent_cont_dim, droprate_init=self.droprate_init, weight_decay=self.weight_decay, lamba=self.lambda_l0))
+        #
+        #     self.fc_log_var = nn.Sequential(L0Dense(self.hidden_dim, self.latent_cont_dim, droprate_init=self.droprate_init, weight_decay=self.weight_decay, lamba=self.lambda_l0))'''
+        #
+        #     self.fc_latent = nn.Sequential(L0Pair(self.hidden_dim, self.latent_cont_dim, droprate_init=self.droprate_init, weight_decay=self.weight_decay, lamba=self.lambda_l0))
 
         # Define decoder
         decoder_layers = []
@@ -255,12 +269,9 @@ class VLAE(nn.Module):
                 nn.Linear(self.cs[3], int(self.fs[2] * self.fs[2] * self.cs[2])),
                 nn.BatchNorm1d(int(self.fs[2] * self.fs[2] * self.cs[2])),
                 nn.ReLU(),
-                MNISTReshaper(),
+                DSPRITESReshaper(),
                 nn.ConvTranspose2d(self.cs[2], self.cs[1], (4, 4), stride=2, padding=1),
                 nn.BatchNorm2d(self.cs[1]),
-                nn.LeakyReLU(0.1),
-                nn.ConvTranspose2d(self.cs[1], self.img_size[0], (4, 4), stride=2, padding=1),
-                nn.BatchNorm2d(self.img_size[0]),
                 nn.LeakyReLU(0.1),
                 nn.ConvTranspose2d(self.cs[1], self.img_size[0], (4, 4), stride=2, padding=1),
                 nn.Sigmoid()
@@ -311,23 +322,54 @@ class VLAE(nn.Module):
         L0 regularization
         """
         regularization = 0.
+        mask = 1
         batch_size = x.size()[0]
 
         latent_list = {}
         inference0 = self.inference0(x)
-        if self.ladder_dim[0] == 0 and self.ladder_dim[1] == 0:
-            inference1 = self.inference1(inference0)
-            ladder2 = self.ladder2(inference1)
-            latent_list["ladder2"] = (self.ladder2_mean(ladder2), self.ladder2_std(ladder2) + 0.0001)
+        if self.pruning == False:
+            if self.ladder_dim[0] == 0 and self.ladder_dim[1] == 0:
+                inference1 = self.inference1(inference0)
+                ladder2 = self.ladder2(inference1)
+                latent_list["ladder2"] = (self.ladder2_mean(ladder2), self.ladder2_std(ladder2) + 0.0001)
+            else:
+                ladder0 = self.ladder0(x)
+                latent_list["ladder0"] = (self.ladder0_mean(ladder0), self.ladder0_std(ladder0) + 0.0001)
+                ladder1 = self.ladder1(inference0)
+                latent_list["ladder1"] = (self.ladder1_mean(ladder1), self.ladder1_std(ladder1) + 0.0001)
+                inference1 = self.inference1(inference0)
+                ladder2 = self.ladder2(inference1)
+                latent_list["ladder2"] = (self.ladder2_mean(ladder2), self.ladder2_std(ladder2) + 0.0001)
+
         else:
-            ladder0 = self.ladder0(x)
-            latent_list["ladder0"] = (self.ladder0_mean(ladder0), self.ladder0_std(ladder0) + 0.0001)
-            ladder1 = self.ladder1(inference0)
-            latent_list["ladder1"] = (self.ladder1_mean(ladder1), self.ladder1_std(ladder1) + 0.0001)
-            inference1 = self.inference1(inference0)
-            ladder2 = self.ladder2(inference1)
-            latent_list["ladder2"] = (self.ladder2_mean(ladder2), self.ladder2_std(ladder2) + 0.0001)
-        mask = 1  ##!!
+            #             for layer in latent_dist['cont']:
+            regularization += self.lambda_l0 * self.fc_latent[0].regularization().cuda() / 162079.
+            mask = self.fc_latent[0].sample_mask()
+            ladder_pairs = [
+                self.ladder0_pair,
+                self.ladder1_pair,
+                self.ladder2_pair
+            ]
+            if self.ladder_dim[0] == 0 and self.ladder_dim[1] == 0:
+                inference1 = self.inference1(inference0)
+                ladder2 = self.ladder2(inference1)
+                latent_list["ladder2"] = (self.ladder2_pair(ladder2))
+                regularization += self.lambda_l0 * self.ladder2_pair.regularization().cuda()/ 663552.
+            else:
+                ladder0 = self.ladder0(x)
+                latent_list["ladder0"] = (self.ladder0_pair(ladder0))
+                ladder1 = self.ladder1(inference0)
+                latent_list["ladder1"] = (self.ladder1_pair(ladder1))
+                inference1 = self.inference1(inference0)
+                ladder2 = self.ladder2(inference1)
+                latent_list["ladder2"] = (self.ladder2_pair(ladder2))
+                # sum reg and cat mask to be (1, latent_dim_sum)
+                for i in range(len(self.ladder_dim)):
+                    regularization += self.lambda_l0 * ladder_pairs[i].regularization().cuda() / 663552.
+                    if i == 0:
+                        mask = ladder_pairs[0].sample_mask()
+                    else:
+                        mask = torch.cat((mask, ladder_pairs[i].sample_mask()))
 
         return latent_list, mask, regularization
 
